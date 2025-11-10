@@ -7,96 +7,144 @@ NUM_ROWS = 100000
 FRESH_ROWS = NUM_ROWS // 2
 BAD_ROWS = NUM_ROWS - FRESH_ROWS
 OUTPUT_FILENAME = 'food_freshness_dataset.csv'
-HEADER = ['C2H5OH_PPM', 'NH3_PPM', 'CH4_PPM', 'MQ_Analog_Value', 'Output']
+HEADER = [
+    'MQ135_Analog',         # MQ135 Air Quality Sensor (0-1023)
+    'MQ3_Analog',           # MQ3 Alcohol Sensor (0-1023)
+    'MiCS5524_Analog',      # Fermion MiCS-5524 Gas Sensor (0-1023)
+    'Output'                # 1=Fresh, 0=Bad
+]
 
-# --- Sensor Constraints ---
-C2H5OH_RANGE = (10.1, 499.9)
-NH3_RANGE = (1.1, 499.9)
-CH4_RANGE = (100.1, 1999.9)
-MQ_ANALOG_RANGE = (50, 950)
+# --- Sensor Constraints (Analog readings from 10-bit ADC) ---
+# All sensors output analog values that are read by Arduino's ADC (0-1023)
+
+# MQ135 Air Quality Sensor
+# Detects: NH3, NOx, alcohol, benzene, smoke, CO2
+# Fresh air: 100-300, Polluted/Spoiled: 400-1023
+MQ135_FRESH_RANGE = (100, 350)
+MQ135_BAD_RANGE = (400, 1023)
+
+# MQ3 Alcohol Sensor
+# Detects: Alcohol, ethanol vapor
+# Low alcohol (fresh): 100-350, High alcohol (fermentation): 400-1023
+MQ3_FRESH_RANGE = (100, 350)
+MQ3_BAD_RANGE = (400, 1023)
+
+# Fermion MiCS-5524 MEMS Gas Sensor
+# Detects: CO, CH4, C2H5OH, H2, NH3 (multi-gas)
+# Clean air: 100-300, High gas concentration (spoiled): 400-1023
+MICS5524_FRESH_RANGE = (100, 350)
+MICS5524_BAD_RANGE = (400, 1023)
 
 def generate_fresh_row():
     """
     Generates a 'Fresh' (Output=1) data row.
-    Rules: C2H5OH <= 80 AND NH3 <= 80 AND MQ_Analog <= 400
+    Fresh food characteristics:
+    - Low gas concentration on all sensors
+    - MQ135: Clean air, low NH3/pollutants
+    - MQ3: Low alcohol vapor
+    - MiCS-5524: Low multi-gas concentration
     """
     
-    # 1. Generate C2H5OH (Ethanol) within the 'Fresh' constraint
-    # (Range: 10.1 to 80.0)
-    c2h5oh = np.random.uniform(C2H5OH_RANGE[0], 80.0)
+    # MQ135 Air Quality Sensor - Fresh food produces clean readings
+    # Low values indicate good air quality, minimal spoilage gases
+    mq135_base = np.random.uniform(MQ135_FRESH_RANGE[0], MQ135_FRESH_RANGE[1])
+    mq135_analog = int(np.clip(np.random.normal(loc=mq135_base, scale=20), 
+                               MQ135_FRESH_RANGE[0], MQ135_FRESH_RANGE[1]))
     
-    # 2. Generate NH3 (Ammonia) within the 'Fresh' constraint
-    # (Range: 1.1 to 80.0)
-    nh3 = np.random.uniform(NH3_RANGE[0], 80.0)
+    # MQ3 Alcohol Sensor - Fresh food has minimal alcohol/fermentation
+    mq3_base = np.random.uniform(MQ3_FRESH_RANGE[0], MQ3_FRESH_RANGE[1])
+    mq3_analog = int(np.clip(np.random.normal(loc=mq3_base, scale=20), 
+                             MQ3_FRESH_RANGE[0], MQ3_FRESH_RANGE[1]))
     
-    # 3. Generate CH4 (Methane) - generally lower for fresh
-    ch4 = np.random.uniform(CH4_RANGE[0], 500.0)
-    
-    # 4. Generate correlated MQ_Analog_Value
-    # We map the C2H5OH range (10-80) to the MQ_Analog 'Fresh' range (50-400)
-    # (80-10) = 70. (400-50) = 350. Multiplier is 5.
-    mq_base = 50 + (c2h5oh - 10) * 5
-    # Add Gaussian noise and clip to the allowed 'Fresh' range (50-400)
-    mq_analog = int(np.clip(np.random.normal(loc=mq_base, scale=25), 50, 400))
+    # Fermion MiCS-5524 MEMS Gas Sensor - Low multi-gas detection
+    mics5524_base = np.random.uniform(MICS5524_FRESH_RANGE[0], MICS5524_FRESH_RANGE[1])
+    mics5524_analog = int(np.clip(np.random.normal(loc=mics5524_base, scale=20), 
+                                  MICS5524_FRESH_RANGE[0], MICS5524_FRESH_RANGE[1]))
 
-    return [f"{c2h5oh:.2f}", f"{nh3:.2f}", f"{ch4:.2f}", mq_analog, 1]
+    return [
+        mq135_analog,
+        mq3_analog,
+        mics5524_analog,
+        1  # Fresh
+    ]
 
 def generate_bad_row():
     """
     Generates a 'Bad' (Output=0) data row.
-    Rule: (C2H5OH > 100) OR (NH3 > 100) OR (MQ_Analog > 600)
-    We create 3 types of "bad" data to satisfy these rules + noise.
+    Bad/Spoiled food characteristics:
+    - High gas concentration on all sensors
+    - MQ135: High NH3, pollutants from decomposition
+    - MQ3: High alcohol from fermentation
+    - MiCS-5524: High multi-gas from spoilage
+    
+    We create 3 types of spoilage patterns:
+    1. Fermentation-dominant (60%) - Very high MQ3 + elevated others
+    2. Decomposition-dominant (30%) - Very high MQ135 + elevated others
+    3. Advanced spoilage (10%) - All sensors very high
     """
     
     rand_type = np.random.rand()
     
-    # Type 1 (60% of bad data): High Ethanol (Fermentation)
-    # This satisfies the (C2H5OH > 100) rule and the strong correlation rule.
+    # Type 1 (60% of bad data): Fermentation-Dominant Spoilage
+    # Primary indicator: High alcohol (MQ3)
     if rand_type < 0.60:
-        # Bias high: 200 to 499.9
-        c2h5oh = np.random.uniform(200.0, C2H5OH_RANGE[1])
-        # Keep NH3 low to isolate the cause
-        nh3 = np.random.uniform(NH3_RANGE[0], 100.0)
-        # Full range for CH4
-        ch4 = np.random.uniform(CH4_RANGE[0], CH4_RANGE[1])
+        # Very high MQ3 - fermentation produces lots of alcohol vapor
+        mq3_base = np.random.uniform(600, MQ3_BAD_RANGE[1])
+        mq3_analog = int(np.clip(np.random.normal(loc=mq3_base, scale=30), 
+                                 550, MQ3_BAD_RANGE[1]))
         
-        # Correlate MQ_Analog to high C2H5OH
-        # Map C2H5OH (200-500) to MQ_Analog (450-950)
-        # (500-200) = 300. (950-450) = 500. Multiplier is ~1.67
-        mq_base = 450 + (c2h5oh - 200) * (500 / 300)
-        # Add noise and clip to the 'Bad' range (451-950)
-        mq_analog = int(np.clip(np.random.normal(loc=mq_base, scale=30), 451, 950))
+        # Moderate to high MQ135 - some decomposition byproducts
+        mq135_base = np.random.uniform(450, 750)
+        mq135_analog = int(np.clip(np.random.normal(loc=mq135_base, scale=30), 
+                                   MQ135_BAD_RANGE[0], 800))
+        
+        # Moderate to high MiCS-5524 - detects various fermentation gases
+        mics5524_base = np.random.uniform(500, 800)
+        mics5524_analog = int(np.clip(np.random.normal(loc=mics5524_base, scale=30), 
+                                      450, 850))
 
-    # Type 2 (30% of bad data): High Ammonia (Decomposition)
-    # This satisfies the (NH3 > 100) rule.
+    # Type 2 (30% of bad data): Decomposition-Dominant Spoilage
+    # Primary indicator: High ammonia/pollutants (MQ135)
     elif rand_type < 0.90:
-        # Keep C2H5OH low to isolate the cause
-        c2h5oh = np.random.uniform(C2H5OH_RANGE[0], 100.0)
-        # Bias NH3 high: 150 to 499.9
-        nh3 = np.random.uniform(150.0, NH3_RANGE[1])
-        # Full range for CH4
-        ch4 = np.random.uniform(CH4_RANGE[0], CH4_RANGE[1])
+        # Very high MQ135 - protein breakdown produces NH3
+        mq135_base = np.random.uniform(700, MQ135_BAD_RANGE[1])
+        mq135_analog = int(np.clip(np.random.normal(loc=mq135_base, scale=40), 
+                                   650, MQ135_BAD_RANGE[1]))
         
-        # MQ_Analog remains correlated to the *low* C2H5OH
-        # This results in a low MQ reading, but the row is still
-        # classified as 'Bad' due to high NH3.
-        mq_base = 50 + (c2h5oh - 10) * 5
-        mq_analog = int(np.clip(np.random.normal(loc=mq_base, scale=25), 50, 450))
+        # Moderate MQ3 - some fermentation occurs alongside decomposition
+        mq3_base = np.random.uniform(400, 700)
+        mq3_analog = int(np.clip(np.random.normal(loc=mq3_base, scale=35), 
+                                 MQ3_BAD_RANGE[0], 750))
+        
+        # High MiCS-5524 - detects H2, CO, CH4 from decomposition
+        mics5524_base = np.random.uniform(600, 900)
+        mics5524_analog = int(np.clip(np.random.normal(loc=mics5524_base, scale=35), 
+                                      550, 950))
 
-    # Type 3 (10% of bad data): High MQ Noise (5% of total dataset)
-    # This satisfies the (MQ_Analog > 600) rule and the noise requirement.
+    # Type 3 (10% of bad data): Advanced/Severe Spoilage
+    # All sensors show very high readings - food is severely spoiled
     else:
-        # Keep C2H5OH and NH3 low
-        c2h5oh = np.random.uniform(C2H5OH_RANGE[0], 100.0)
-        nh3 = np.random.uniform(NH3_RANGE[0], 100.0)
-        # Full range for CH4
-        ch4 = np.random.uniform(CH4_RANGE[0], CH4_RANGE[1])
+        # Very high MQ135 - severe decomposition
+        mq135_base = np.random.uniform(800, MQ135_BAD_RANGE[1])
+        mq135_analog = int(np.clip(np.random.normal(loc=mq135_base, scale=40), 
+                                   750, MQ135_BAD_RANGE[1]))
         
-        # Force a high MQ reading (e.g., "Lighter gas" false positive)
-        # This triggers the (MQ_Analog > 600) rule.
-        mq_analog = np.random.randint(601, 950)
+        # Very high MQ3 - severe fermentation
+        mq3_base = np.random.uniform(750, MQ3_BAD_RANGE[1])
+        mq3_analog = int(np.clip(np.random.normal(loc=mq3_base, scale=40), 
+                                 700, MQ3_BAD_RANGE[1]))
+        
+        # Very high MiCS-5524 - maximum gas concentration
+        mics5524_base = np.random.uniform(800, MICS5524_BAD_RANGE[1])
+        mics5524_analog = int(np.clip(np.random.normal(loc=mics5524_base, scale=40), 
+                                      750, MICS5524_BAD_RANGE[1]))
 
-    return [f"{c2h5oh:.2f}", f"{nh3:.2f}", f"{ch4:.2f}", mq_analog, 0]
+    return [
+        mq135_analog,
+        mq3_analog,
+        mics5524_analog,
+        0  # Bad/Spoiled
+    ]
 
 def main():
     """
