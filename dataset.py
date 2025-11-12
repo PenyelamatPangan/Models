@@ -11,7 +11,8 @@ HEADER = [
     'MQ135_Analog',         # MQ135 Air Quality Sensor (0-1023)
     'MQ3_Analog',           # MQ3 Alcohol Sensor (0-1023)
     'MiCS5524_Analog',      # Fermion MiCS-5524 Gas Sensor (0-1023)
-    'Output'                # 1=Fresh, 0=Bad
+    'Output',               # 1=Fresh, 0=Bad
+    'RSL_Hours'             # Remaining Shelf Life in hours (0-168)
 ]
 
 # --- Sensor Constraints (Analog readings from 10-bit ADC) ---
@@ -43,6 +44,9 @@ def generate_fresh_row():
     - MQ135: Clean air, low NH3/pollutants
     - MQ3: Low alcohol vapor
     - MiCS-5524: Low multi-gas concentration
+    - RSL: 24-168 hours (1-7 days remaining)
+    
+    RSL Correlation: Lower sensor values = longer shelf life
     """
     
     # MQ135 Air Quality Sensor - Fresh food produces clean readings
@@ -61,11 +65,29 @@ def generate_fresh_row():
     mics5524_analog = int(np.clip(np.random.normal(loc=mics5524_base, scale=20), 
                                   MICS5524_FRESH_RANGE[0], MICS5524_FRESH_RANGE[1]))
 
+    # Calculate RSL (Remaining Shelf Life) based on sensor values
+    # Lower sensor values = fresher food = longer shelf life
+    # Normalize sensor values to 0-1 range within fresh range
+    mq135_norm = (mq135_analog - MQ135_FRESH_RANGE[0]) / (MQ135_FRESH_RANGE[1] - MQ135_FRESH_RANGE[0])
+    mq3_norm = (mq3_analog - MQ3_FRESH_RANGE[0]) / (MQ3_FRESH_RANGE[1] - MQ3_FRESH_RANGE[0])
+    mics5524_norm = (mics5524_analog - MICS5524_FRESH_RANGE[0]) / (MICS5524_FRESH_RANGE[1] - MICS5524_FRESH_RANGE[0])
+    
+    # Average normalized value (0 = very fresh, 1 = at threshold)
+    avg_freshness = (mq135_norm + mq3_norm + mics5524_norm) / 3.0
+    
+    # Map to RSL: 0 freshness = 168 hours (7 days), 1 freshness = 24 hours (1 day)
+    # Inverse relationship: lower sensor values = higher RSL
+    base_rsl = 168 - (avg_freshness * (168 - 24))
+    
+    # Add some randomness (±12 hours)
+    rsl_hours = int(np.clip(base_rsl + np.random.uniform(-12, 12), 24, 168))
+
     return [
         mq135_analog,
         mq3_analog,
         mics5524_analog,
-        1  # Fresh
+        1,  # Fresh
+        rsl_hours
     ]
 
 def generate_bad_row():
@@ -76,11 +98,14 @@ def generate_bad_row():
     - MQ135: High NH3, pollutants from decomposition
     - MQ3: High alcohol from fermentation
     - MiCS-5524: High multi-gas from spoilage
+    - RSL: 0-23 hours (less than 1 day remaining)
     
     We create 3 types of spoilage patterns:
     1. Fermentation-dominant (60%) - Very high MQ3 + elevated others
     2. Decomposition-dominant (30%) - Very high MQ135 + elevated others
     3. Advanced spoilage (10%) - All sensors very high
+    
+    RSL Correlation: Higher sensor values = shorter shelf life
     """
     
     rand_type = np.random.rand()
@@ -139,11 +164,29 @@ def generate_bad_row():
         mics5524_analog = int(np.clip(np.random.normal(loc=mics5524_base, scale=40), 
                                       750, MICS5524_BAD_RANGE[1]))
 
+    # Calculate RSL (Remaining Shelf Life) for bad food
+    # Higher sensor values = more spoiled = shorter shelf life
+    # Normalize sensor values to 0-1 range within bad range
+    mq135_norm = (mq135_analog - MQ135_BAD_RANGE[0]) / (MQ135_BAD_RANGE[1] - MQ135_BAD_RANGE[0])
+    mq3_norm = (mq3_analog - MQ3_BAD_RANGE[0]) / (MQ3_BAD_RANGE[1] - MQ3_BAD_RANGE[0])
+    mics5524_norm = (mics5524_analog - MICS5524_BAD_RANGE[0]) / (MICS5524_BAD_RANGE[1] - MICS5524_BAD_RANGE[0])
+    
+    # Average normalized value (0 = just crossed threshold, 1 = completely spoiled)
+    avg_spoilage = (mq135_norm + mq3_norm + mics5524_norm) / 3.0
+    
+    # Map to RSL: 0 spoilage = 23 hours, 1 spoilage = 0 hours
+    # Inverse relationship: higher sensor values = lower RSL
+    base_rsl = 23 - (avg_spoilage * 23)
+    
+    # Add some randomness (±3 hours)
+    rsl_hours = int(np.clip(base_rsl + np.random.uniform(-3, 3), 0, 23))
+
     return [
         mq135_analog,
         mq3_analog,
         mics5524_analog,
-        0  # Bad/Spoiled
+        0,  # Bad/Spoiled
+        rsl_hours
     ]
 
 def main():
