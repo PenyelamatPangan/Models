@@ -8,9 +8,9 @@ FRESH_ROWS = NUM_ROWS // 2
 BAD_ROWS = NUM_ROWS - FRESH_ROWS
 OUTPUT_FILENAME = 'food_freshness_dataset.csv'
 HEADER = [
-    'MQ135_NH3',            # MQ135 NH3 Sensor (0-15 ppm range)
-    'CO2_Sensor',           # CO2 Sensor (500-1000+ ppm range)
-    'MiCS5524_CH4',         # MiCS-5524 CH4 Methane Sensor (200-500+ ppm range)
+    'MQ135_Analog',         # MQ135 NH3 Sensor (0-15 ppm range)
+    'MQ3_Analog',           # CO2 Sensor (500-1200 ppm range)
+    'MiCS5524_Analog',      # MiCS-5524 CH4 Methane Sensor (200-600 ppm range)
     'Output',               # 1=Fresh, 0=Bad
     'RSL_Hours'             # Remaining Shelf Life in hours (0-168)
 ]
